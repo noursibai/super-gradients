@@ -49,6 +49,7 @@ class PoseEstimationMetrics(Metric):
         iou_thresholds: Optional[Iterable] = None,
         recall_thresholds: Optional[Iterable] = None,
         iou_thresholds_to_report: Optional[Iterable] = None,
+        bool_use_heuristic_area: bool = False,
     ):
         """
         Compute the AP & AR metrics for pose estimation. By default, this class returns only AP and AR values.
@@ -74,6 +75,7 @@ class PoseEstimationMetrics(Metric):
 
         """
         super().__init__(dist_sync_on_step=False)
+        self.bool_use_heuristic_area = bool_use_heuristic_area
         self.num_joints = num_joints
         self.max_objects_per_image = max_objects_per_image
         self.stats_names = ["AP", "AR"]
@@ -172,8 +174,8 @@ class PoseEstimationMetrics(Metric):
         if gt_bboxes is None:
             gt_bboxes = [compute_visible_bbox_xywh(torch.tensor(joints[:, :, 0:2]), torch.tensor(joints[:, :, 2])) for joints in gt_joints]
 
-        if gt_areas is None:
-            gt_areas = [bboxes[:, 2] * bboxes[:, 3] for bboxes in gt_bboxes]
+        if self.bool_use_heuristic_area or gt_areas is None:
+            gt_areas = [bboxes[:, 2] * bboxes[:, 3] * 0.53 for bboxes in gt_bboxes]
 
         if gt_iscrowd is None:
             gt_iscrowd = [[False] * len(x) for x in gt_joints]
