@@ -1,0 +1,84 @@
+import os
+import torch
+from super_gradients.training.utils.callbacks.callbacks import Callback
+from super_gradients.training.utils.callbacks.base_callbacks import PhaseContext
+
+class SaveTopKModelsCallback(Callback):
+    def __init__(self, metric_name, k, dirpath):
+        """
+        Callback to save the top-k model checkpoints based on a specific metric.
+
+        :param metric_name: str, the name of the metric to monitor.
+        :param k: int, the number of top models to keep.
+        :param dirpath: str, directory path to save the models.
+        """
+        super().__init__()
+        self.metric_name = metric_name
+        self.k = k
+        self.dirpath = dirpath
+        
+        # Lists to store the top-k metric scores and corresponding epoch numbers
+        self.top_k_scores = []
+        self.saved_epochs = []
+
+    def on_validation_loader_end(self, context: PhaseContext) -> None:
+        """
+        Called each epoch at the end of validation data loader.
+        Checks if the model of the current epoch is among the top-k based on the specified metric
+        and saves the model checkpoint if it is. Deletes any checkpoints that are no longer in the top-k.
+
+        :param context: PhaseContext, the context providing info about the current training phase.
+        """
+        # Extract metric value for the current epoch
+        current_metric_value = context.metrics_dict.get(self.metric_name)
+        
+        # Handle the case when the metric is not found
+        if current_metric_value is None:
+            print(f"Metric {self.metric_name} not found in validation metrics.")
+            return
+        
+        # Check if the current metric value is one of the top-k
+        if len(self.top_k_scores) < self.k or current_metric_value > min(self.top_k_scores):
+            
+            # Save the current model checkpoint
+            checkpoint_path = os.path.join(self.dirpath, f"ckpt_epoch_{context.epoch}.pth")
+            torch.save({
+                'epoch': context.epoch,
+                'model_state_dict': context.net.state_dict(),
+                'optimizer_state_dict': context.optimizer.state_dict(),
+                'metric_value': current_metric_value
+            }, checkpoint_path)
+            print(f"Saved model checkpoint from epoch {context.epoch} with metric {current_metric_value}")
+            
+            # Add the current metric value and epoch number to their respective lists
+            self.top_k_scores.append(current_metric_value)
+            self.saved_epochs.append(context.epoch)
+            
+            # If there are more than k saved models, delete the one with the lowest metric value
+            if len(self.top_k_scores) > self.k:
+                min_score = min(self.top_k_scores)
+                min_score_epoch = self.saved_epochs[self.top_k_scores.index(min_score)]
+                
+                # Construct path to the checkpoint to delete
+                delete_path = os.path.join(self.dirpath, f"ckpt_epoch_{min_score_epoch}.pth")
+                
+                # Remove the checkpoint
+                if os.path.exists(delete_path):
+                    os.remove(delete_path)
+                    print(f"Removed model checkpoint from epoch {min_score_epoch} with metric {min_score}")
+
+                # Update the top_k_scores and saved_epochs lists
+                self.top_k_scores.remove(min_score)
+                self.saved_epochs.remove(min_score_epoch)
+# Define directory path and other settings
+CHECKPOINT_DIR = "path_to_save_checkpoints"
+METRIC_TO_WATCH = "your_metric_name"  # Make sure to replace with the metric you're interested in
+
+# Initialize the SaveTopKModelsCallback
+save_top_k_callback = SaveTopKModelsCallback(metric_name=METRIC_TO_WATCH, k=3, dirpath=CHECKPOINT_DIR)
+
+# Add the callback to the phase callbacks list
+phase_callbacks = [save_top_k_callback]
+
+# Update train_params with phase_callbacks
+train_params.update({"phase_callbacks": phase_callbacks})
